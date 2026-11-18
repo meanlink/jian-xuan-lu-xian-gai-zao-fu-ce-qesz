@@ -6,6 +6,15 @@
 数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
 三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery。
 
+## 月末节省工时结算
+结果页「月末工时结算」把已批准复测结论转化为班组折算值（平均节省秒数 ÷ 3600 = 每单节省工时），按班次实拣单量估算节省工时。
+- 折算值只取自已批准且完成的 Job：优先班组专属结论，其次「全部」口径；登记班次时把结论与折算值快照锁定（`ShiftEntry.rate_snapshot` / `Posting.rate_snapshot`），后续结论更新不影响历史账。
+- 同一班组同一班次日期在一个会计期间只能登记一次（`uq_shift_once`）；登记/更正请求带幂等键，中断重试回放同一分录，不重复入账。
+- 未关账期间可更正：原分录按锁定折算值就地重算；已关账期间原数保留，更正差额结转到首个未关账月份（`uq_entry_period_posting` 保证同一笔变化只归一期），迟到单量同样计入首个未关账月份，补差一律沿用原折算值。
+- 关账仅 admin 可执行且幂等；服务层对期间行 `SELECT ... FOR UPDATE`（SQLite 自动降级），串行化关账与改量并发。
+- 新实体：`AccountingPeriod` 会计期间、`ShiftEntry` 班次单量登记、`Posting` 入账分录（initial/correction/late）。接口前缀 `/api/settlement`（rate-card、periods、entries、volumes、entries/{id}/correction、close）。
+- 规则测试：`python3 test-artifacts/gb-1006/tests/test_settlement_rules.py`（仅标准库）；ORM 与 API 测试 `test_settlement_db.py`、`test_settlement_api.py`（需 backend 依赖，可用 `PICK_BACKEND` 覆盖后端路径）。
+
 ## 快速启动
 ```bash
 cp .env.example .env
